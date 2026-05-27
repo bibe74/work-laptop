@@ -1,0 +1,58 @@
+# Environment files - contains sensitive client information
+.env
+
+# Installation checklists (dated files) - keep template only
+INSTALL-[0-9]*.md
+
+# Windows
+Thumbs.db
+Desktop.ini
+
+# VS Code
+.vscode/
+*.code-workspace
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Credentials and sensitive data
+*.credentials
+*.key
+*.pem
+*-credentials.json
+
+# Client-specific configuration (not in .env.sample)
+client-config.json
+client-settings.json
+
+# VPN configuration files (contain sensitive connection info)
+*.ovpn
+
+# Bitwarden data (if local backups made)
+*.bwdata
+
+# Database backups and exports
+*.bak
+*.backup
+*.sql.gz
+*.dump
+
+# MariaDB/MySQL data directories
+/data/mysql/
+/data/mariadb/
+
+# Power BI files (may contain sensitive data)
+*.pbix
+*.pbit
+
+# Remote Desktop Manager data files
+*.rdm
+*.rdmx
+
+# Backup files
+*.bak
+*.backup
