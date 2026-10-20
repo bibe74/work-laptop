@@ -108,6 +108,7 @@ This repository will include:
 work-laptop/
 ├── README.md                          # This file - project overview
 ├── INSTALL-template.md                # Installation checklist template
+├── INSTALL-Ubuntu.md                  # Ubuntu 26.10 setup for Dell XPS 13
 ├── .env.sample                        # Environment variables template
 ├── .gitignore                         # Git ignore rules
 ├── docs/                              # Detailed documentation
@@ -221,6 +222,8 @@ When you first clone this repository, you need to configure your environment:
 17. Final configurations and optimizations
 
 **Note**: See [Periodic Updates Guide](docs/configuration/periodic-updates.md) for maintaining all software.
+
+**Linux setup path**: For an Ubuntu workstation instead of the Windows setup above, see [Ubuntu 26.10 on a Dell XPS 13](INSTALL-Ubuntu.md).
 
 ## 🔄 Maintenance & Updates
 
