@@ -22,6 +22,11 @@ This folder contains guides for configuring Windows, system settings, and softwa
 - VPN configuration and auto-connect
 - Network drives and printer mapping
 
+### Workspace & Workflow
+- [Workspace Structure](workspace-structure.md) ✅ Created
+  - Directory layout for customers, repositories, Docker stacks, documents and backups
+  - Git identity per customer, weekly NAS sync, invoices on Google Drive
+
 ### Development Environment
 - Visual Studio settings and extensions
 - VS Code settings and extensions

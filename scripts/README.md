@@ -51,3 +51,8 @@ Each script should include:
 - Error handling
 - Logging
 - Rollback capability (where applicable)
+
+## Available Scripts
+
+- **New-InstallationChecklist.ps1** - Creates a dated installation checklist from `INSTALL-template.md`.
+- **New-Customer.ps1** - Creates a customer workspace (`repos`, `docker`, `documents`, `backups`) and its `README.md` customer card, as described in [Workspace Structure](../docs/configuration/workspace-structure.md). Interactive; every question can also be passed as a parameter. Use `-WhatIf` to preview. It never deletes or overwrites folders and never modifies `.gitconfig`.
