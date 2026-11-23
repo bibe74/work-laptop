@@ -37,7 +37,7 @@ C:\Work\
 ├── 1729\                              ← own workspace (main Git identity)
 │   ├── repos\
 │   │   ├── work-laptop\               ← this repository
-│   │   └── work-ops\                  ← sync scripts, workspace manifest (optional, see §7)
+│   │   └── work-ops\                  ← personal scripts (the NAS sync is `Sync-Work.ps1` in work-laptop, see §7)
 │   ├── docker\
 │   ├── documents\
 │   └── backups\
@@ -475,85 +475,105 @@ Prefer `.bak`/`.bacpac` for databases and use volume tarballs for everything els
 
 ### 7.1 NAS layout mirrors the laptop
 
+The NAS exposes the share `\\NAS-1729\Work`. The weekly sync writes **only** into its `Git` folder and reproduces there the exact folder structure of `C:\Work`:
+
 ```text
-\\NAS\Work\                    ← mirror of C:\Work (documents, backups, docker exports)
-    CesiMultimedia\ Metra\ CodicePlastico\ ...
-\\NAS\GitMirrors\              ← bare mirrors of every repo
-    CesiMultimedia\cesi-site.git
-    CodicePlastico\A2A\a2a-dwh.git
-\\NAS\GoogleDrive\             ← optional, copy of the invoices (see §8)
+\\NAS-1729\Work\
+├── Git\                                   ← target of the weekly sync (and ONLY this folder)
+│   ├── 1729\
+│   │   └── repos\
+│   │       └── work-laptop.git            ← bare mirror of C:\Work\1729\repos\work-laptop
+│   ├── CesiMultimedia\
+│   │   ├── documents\...                  ← plain copy of C:\Work\CesiMultimedia\documents
+│   │   ├── backups\...                    ← plain copy
+│   │   └── repos\
+│   │       └── Cesi.git                   ← bare mirror of C:\Work\CesiMultimedia\repos\Cesi
+│   └── CodicePlastico\A2A\ ...
+├── _old\                                  ← NOT managed by the sync: never touched
+├── _Archive\                              ← NOT managed by the sync: never touched
+└── @Recycle, @Recently-Snapshot           ← NAS system folders
 ```
 
-Because both sides share the same relative structure, the sync is one loop over the workspaces.
+Because both sides share the same relative structure, a path on the NAS is the laptop path with `\\NAS-1729\Work\Git` in front of it, and a repository `X` becomes `X.git`. The same script handles every workspace: there is no per-customer list to maintain.
 
-### 7.2 Sync policy per folder
+> The optional copy of the Google Drive invoices (§8) is outside the weekly sync described here.
 
-| Folder | Git remote (cloud) | NAS weekly method | Notes |
-|--------|--------------------|-------------------|-------|
-| `repos` | `origin` (GitHub/AzDO/...) | **`git push --mirror` to a bare repo on the NAS** (remote `nas`) | Never copy a working tree with `.git` while it can change. Uncommitted work is not saved: the pre-flight check below reports it. |
-| `docker` | same as `repos` | same as `repos` | Compose files and init scripts only. |
-| `documents` | none | File sync **without deletions** | Customer data: the NAS share should be encrypted and access-controlled. |
-| `backups` | none | File sync, then prune locally | Verify, then delete old local files. |
-| Drive invoices | Google Drive | Optional `rclone copy` | Gives you a second copy outside Google. |
+### 7.2 Sync policy
 
-Use **`robocopy /E`** (without `/MIR` or `/PURGE`) or `rclone copy` so that an accidental local deletion is never propagated to the NAS. If the NAS supports snapshots (e.g. Btrfs/ZFS), enable them on the share: they protect against ransomware and against overwriting good files with bad ones.
+[`scripts/Sync-Work.ps1`](../../scripts/Sync-Work.ps1) walks the whole of `C:\Work` once and treats every folder in one of two ways:
 
-### 7.3 Manifest: the single source of truth
+| What | How it is synced | Notes |
+|------|------------------|-------|
+| **Git repositories** (any folder that contains `.git`, wherever it is: `repos\`, but also e.g. `docker\odoo`) | `git push --mirror` to a bare `<name>.git` at the same relative path under `Git\`. The bare repository is created on the first run. | A working tree is never copied while it can change. **Uncommitted and untracked files, and ignored files (`.env`, local data), are not saved**: the script lists the repositories that have uncommitted work. Commits that are not on any remote *are* saved. |
+| **Everything else** (`documents`, `backups`, shortcuts, `README.md` cards, ...) | `robocopy /E`: new and changed files are copied. | **No deletions on the NAS** (no `/MIR`, no `/PURGE`): a file deleted or renamed locally stays on the NAS. |
 
-`work-ops\workspaces.json` (or inside this repository under `scripts\`):
+Excluded from both: `docker_volumes` (raw Docker volume data: copying live database files gives corrupt backups, see §6.3 for how to export them), and the folders named `node_modules`, `$RECYCLE.BIN` and `System Volume Information`. `Thumbs.db` and Office lock files (`~$*`) are skipped. Change the defaults in the `param()` block of the script, or pass `-ExcludePath`, `-ExcludeDirectory`, `-ExcludeFile`.
 
-```json
-[
-  { "name": "1729",              "path": "C:\\Work\\1729",                    "sqlPort": 14330, "invoices": null },
-  { "name": "CesiMultimedia",    "path": "C:\\Work\\CesiMultimedia",          "sqlPort": 14331, "invoices": "Invoices\\<year>\\Issued\\CesiMultimedia" },
-  { "name": "Metra",             "path": "C:\\Work\\Metra",                   "sqlPort": 14332, "invoices": "Invoices\\<year>\\Issued\\Metra" },
-  { "name": "CodicePlastico/A2A",               "path": "C:\\Work\\CodicePlastico\\A2A",               "sqlPort": 14333, "invoices": "Invoices\\<year>\\Issued\\CodicePlastico" },
-  { "name": "CodicePlastico/Berg",              "path": "C:\\Work\\CodicePlastico\\Berg",              "sqlPort": 14334, "invoices": "Invoices\\<year>\\Issued\\CodicePlastico" },
-  { "name": "CodicePlastico/NSA",               "path": "C:\\Work\\CodicePlastico\\NSA",               "sqlPort": 14335, "invoices": "Invoices\\<year>\\Issued\\CodicePlastico" },
-  { "name": "CodicePlastico/FraternitaSistemi", "path": "C:\\Work\\CodicePlastico\\FraternitaSistemi", "sqlPort": 14336, "invoices": "Invoices\\<year>\\Issued\\CodicePlastico" }
-]
-```
+Notes:
 
-### 7.4 Sketch of the weekly script
+- Deleted local branches/tags **are** removed from the NAS mirror (that is what a mirror is); the objects remain in the bare repository until it is garbage-collected, and the NAS snapshots protect the rest. A repository without any commit is skipped, so an empty clone can never erase an existing mirror.
+- Pre-push hooks of the repositories are not run (`--no-verify`). Git LFS objects and submodule contents are not part of a mirror.
+- If the NAS supports snapshots (e.g. Btrfs/ZFS), keep them enabled on the share: they protect against ransomware and against overwriting good files with bad ones.
+- For stronger guarantees (deduplication, encryption, point-in-time restore) consider `restic` or `rclone` instead of `robocopy`.
+
+### 7.3 Safety rules built into the script
+
+- It writes **only** to `\\NAS-1729\Work\Git`. `_old`, `_Archive`, `@Recycle` and `@Recently-Snapshot` are never touched, and the script refuses a destination folder named like a protected folder (starting with `_` or `@`).
+- The `Git` folder must already exist; it is never created automatically, so a typo cannot create a stray folder on the NAS.
+- It refuses to run when the NAS is unreachable (it retries 3 times, one minute apart, to survive a laptop that wakes up before the network), when the source is missing or empty, or when another instance is already running.
+- Junctions and symbolic links are not followed.
+- `-WhatIf` lists what would be copied and mirrored without writing anything on the NAS.
+- Logs go to `%LOCALAPPDATA%\Sync-Work\logs` (never inside `C:\Work`, so they are not synced): a summary log and the full `robocopy` log of each run, kept for 90 days.
+- Exit code `0` = OK, `1` = completed with errors (Task Scheduler shows a failure), `2` = could not start, `3` = already running. `robocopy` codes 0-7 count as success, 8 and above as errors.
+
+### 7.4 First run
+
+1. **Make the NAS credentials available without a prompt** (the scheduled task runs as you, with your Windows Credential Manager):
+
+   ```powershell
+   cmdkey /add:NAS-1729 /user:<nas-user> /pass:<password>
+   dir \\NAS-1729\Work     # must list Git, _old, _Archive without asking for credentials
+   ```
+
+2. **Dry run.** Nothing is written to the NAS:
+
+   ```powershell
+   cd C:\Work\1729\repos\work-laptop
+   .\scripts\Sync-Work.ps1 -WhatIf
+   ```
+
+   Check the repository list, the `robocopy` list (the first run copies everything) and the warnings about uncommitted work.
+
+   If PowerShell refuses to run scripts: `pwsh -ExecutionPolicy Bypass -File .\scripts\Sync-Work.ps1 -WhatIf` (or set `RemoteSigned` as in [`scripts/README.md`](../../scripts/README.md)).
+
+3. **First real run.** It can take a long time (the whole of `C:\Work` goes over the network):
+
+   ```powershell
+   .\scripts\Sync-Work.ps1
+   ```
+
+4. **Run it a second time**: it must be quick and copy almost nothing.
+
+### 7.5 Weekly schedule
 
 ```powershell
-# Sync-Work.ps1  (sketch: test with -WhatIf-style dry runs before trusting it)
-param([string]$Nas = '\\NAS\Work', [string]$Mirrors = '\\NAS\GitMirrors')
+# Registers a Scheduled Task for the current user: every Sunday at 12:00
+.\scripts\Sync-Work.ps1 -RegisterTask -WhatIf                     # preview
+.\scripts\Sync-Work.ps1 -RegisterTask -TaskDay Sunday -TaskTime 12:00
 
-$ws = Get-Content "$PSScriptRoot\workspaces.json" | ConvertFrom-Json
-
-foreach ($w in $ws) {
-  Write-Host "== $($w.name)"
-
-  # 1. Pre-flight: repos with uncommitted or unpushed work
-  Get-ChildItem "$($w.path)\repos" -Directory -ErrorAction SilentlyContinue | ForEach-Object {
-    $dirty    = git -C $_.FullName status --porcelain
-    $unpushed = git -C $_.FullName log '@{u}..' --oneline 2>$null
-    if ($dirty -or $unpushed) { Write-Warning "  $($_.Name): uncommitted/unpushed work" }
-  }
-
-  # 2. Repos (and docker stacks): push everything to the bare mirror on the NAS
-  foreach ($sub in 'repos','docker') {
-    Get-ChildItem "$($w.path)\$sub" -Directory -ErrorAction SilentlyContinue |
-      Where-Object { Test-Path "$($_.FullName)\.git" } | ForEach-Object {
-        $bare = "$Mirrors\$($w.name -replace '/','\')\$($_.Name).git"
-        if (-not (Test-Path $bare)) { git init --bare $bare | Out-Null }
-        git -C $_.FullName push --mirror $bare
-      }
-  }
-
-  # 3. Documents and backups: copy, never delete on the destination
-  foreach ($sub in 'documents','backups') {
-    $src = "$($w.path)\$sub"
-    $dst = "$Nas\$($w.name -replace '/','\')\$sub"
-    if (Test-Path $src) {
-      robocopy $src $dst /E /COPY:DAT /DCOPY:DAT /R:2 /W:5 /XD node_modules .git /NP /NFL /NDL
-    }
-  }
-}
+Start-ScheduledTask -TaskName Sync-Work-To-NAS                    # test it now
+Get-ScheduledTaskInfo -TaskName Sync-Work-To-NAS                  # LastRunTime, LastTaskResult (0 = OK)
 ```
 
-Notes: `robocopy` exit codes 0–7 are success; 8 and above are errors. For stronger guarantees (deduplication, encryption, point-in-time restore) consider `restic` or `rclone` instead of `robocopy`.
+The task runs under Windows PowerShell 5.1 as the logged-on user, with no stored password. If the laptop is off at the scheduled time, it runs as soon as possible afterwards, only when the network is available, and a second run never starts while the first one is still working. Because it runs only while you are logged on, keep the laptop on and signed in (or locked) on Sunday at noon; a missed run starts as soon as you sign in again. To change the schedule, run the command again (the task is updated); to remove it: `Unregister-ScheduledTask -TaskName Sync-Work-To-NAS`.
+
+Check the latest log from time to time (`%LOCALAPPDATA%\Sync-Work\logs`), and run a `-WhatIf` first after every change of the layout.
+
+### 7.6 Restore
+
+- **Files**: copy them back from `\\NAS-1729\Work\Git\<path>` to `C:\Work\<path>`.
+- **A repository**: `git clone \\NAS-1729\Work\Git\<path>\<repo>.git C:\Work\<path>\<repo>`. The clone has all branches and tags; set the original `origin` URL again afterwards (`git remote set-url origin ...`). Work that was uncommitted at the last sync is lost.
+- If git refuses to read the share with "dubious ownership" (the share belongs to another account), allow that one mirror, as git suggests: `git config --global --add safe.directory '\\NAS-1729\Work\Git\<path>\<repo>.git'`. Note that `git -c safe.directory=...` does **not** work for `clone` and `push`, because git does not hand `-c` to the second git process it starts for the other repository. `Sync-Work.ps1` solves this with a private git config file (`GIT_CONFIG_GLOBAL`) used only for its pushes to the NAS, so your own `~/.gitconfig` is left untouched.
 
 ---
 
@@ -585,7 +605,7 @@ Conventions:
 - File name: `<yyyy-MM-dd>_<BillingEntity>_<YYYY>-<number>.pdf` (ISO date first so the folder sorts chronologically).
 - The per-end-customer **timesheets** support the CodicePlastico invoice; they belong next to it, not in the customer's workspace (they are an administrative document, not project data).
 - Keep this folder **out of `C:\Work`**: it holds financial data with a different retention (Italian rules require keeping invoices for years) and a different audience (the accountant).
-- Optional: `rclone copy "gdrive:Invoices" \\NAS\GoogleDrive\Invoices` in the weekly job for a second copy outside Google.
+- Optional: `rclone copy "gdrive:Invoices" \\NAS-1729\Work\GoogleDrive\Invoices` for a second copy outside Google. Use a folder of its own, outside the `Git` target of the weekly sync, and outside `_old` and `_Archive`.
 
 ---
 
@@ -593,18 +613,18 @@ Conventions:
 
 | Event | Action |
 |-------|--------|
-| **New direct customer** | Run `scripts\New-Customer.ps1` (creates the four standard folders and the customer card; it never touches `.gitconfig`). Add an `includeIf` + include file if it needs another Git identity. Add it to `workspaces.json`, assign a SQL port. Create `Invoices\<year>\Issued\<Customer>` on Drive. |
-| **New end customer of CodicePlastico** | Run `scripts\New-Customer.ps1 -Type EndCustomer -Parent CodicePlastico` (the Git identity is already inherited). Add to the manifest. Add `Timesheets\<Client>` on Drive. |
+| **New direct customer** | Run `scripts\New-Customer.ps1` (creates the four standard folders and the customer card; it never touches `.gitconfig`). Add an `includeIf` + include file if it needs another Git identity. Assign a SQL port (written in the card). The NAS sync picks the new folder up by itself. Create `Invoices\<year>\Issued\<Customer>` on Drive. |
+| **New end customer of CodicePlastico** | Run `scripts\New-Customer.ps1 -Type EndCustomer -Parent CodicePlastico` (the Git identity is already inherited). Add `Timesheets\<Client>` on Drive. |
 | **New repo** | `git clone` into `<workspace>\repos\<repo-name>`. Run the audit (§4.4) once to confirm the e-mail. |
 | **Engagement ends** | Run a last sync, verify the NAS copy, then move the whole folder to `C:\Work\_Archive\<year>\<Workspace>` and remove stale Docker volumes (`docker compose down -v`) **after** exporting what you need. Respect the retention required by the contract/NDA, and delete customer data when the contract says so. |
-| **New laptop** | Install the tools (rest of this guide), restore `~/.gitconfig*` and SSH keys (from Bitwarden or an encrypted backup), clone the repos from remotes or from `\\NAS\GitMirrors`, copy `documents`/`backups` back from `\\NAS\Work`. |
+| **New laptop** | Install the tools (rest of this guide), restore `~/.gitconfig*` and SSH keys (from Bitwarden or an encrypted backup), clone the repos from the remotes or from the bare mirrors in `\\NAS-1729\Work\Git`, copy `documents`/`backups` back from the same folder (see §7.6). |
 
 ---
 
 ## 10. Security checklist
 
 - [ ] BitLocker enabled on the laptop SSD (customer data lives in `documents` and `backups`).
-- [ ] The NAS share for `\\NAS\Work` is encrypted and not exposed to the Internet.
+- [ ] The NAS share `\\NAS-1729\Work` is encrypted and not exposed to the Internet.
 - [ ] Secrets only in Bitwarden and local `.env` files; `.env.sample` is the only thing committed.
 - [ ] Global ignore (§4.5) in place; `.bak`/`.bacpac`/`.pbix` never reach a remote by accident.
 - [ ] One SSH key per Git account, `IdentitiesOnly=yes`.
@@ -616,9 +636,9 @@ Conventions:
 
 ## 11. Suggested adoption order
 
-1. Create `C:\Work` and the workspace skeletons (a short script from the manifest can do it).
+1. Create `C:\Work` and the workspace skeletons (`scripts\New-Customer.ps1` does it).
 2. Configure Git (§4): global config, include files, global ignore, SSH keys. Run the audit.
 3. Move existing repositories from `C:\Work.Git\...` to their new `repos\` folders (`git` repositories can simply be moved; re-run the audit afterwards).
 4. Standardise one Docker stack (e.g. `a2a-dwh`) with the §6 pattern and replicate it.
 5. Reorganise Google Drive invoices into the §8 structure.
-6. Set up the NAS shares and run `Sync-Work.ps1` manually a few times before scheduling it (Task Scheduler, weekly).
+6. Run `Sync-Work.ps1 -WhatIf`, then a real run and a second run (§7.4), and only then schedule it with `-RegisterTask` (§7.5).

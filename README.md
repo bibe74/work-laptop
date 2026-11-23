@@ -133,6 +133,9 @@ work-laptop/
 │   └── references/                    # Quick references and checklists
 ├── scripts/                           # Automation scripts (PowerShell, batch files)
 │   ├── New-InstallationChecklist.ps1  # Creates dated checklist from template
+│   ├── New-Customer.ps1               # Creates a customer workspace and its card
+│   ├── Sync-Work.ps1                  # Weekly backup of C:\Work to the NAS (files + Git mirrors)
+│   ├── Backup-Monthly.ps1             # Monthly backup of settings and data outside C:\Work
 │   └── ...
 └── resources/                         # Additional resources (configs, templates)
 ```

@@ -11,7 +11,11 @@ This guide provides a comprehensive approach to keeping all software up to date 
 
 ## 🗓️ Update Schedule
 
+### Weekly (automatic)
+- NAS backup of `C:\Work` (`scripts\Sync-Work.ps1`, Scheduled Task `Sync-Work-To-NAS`, Sundays 12:00): see [Workspace Structure, section 7](workspace-structure.md#7-weekly-nas-sync). Check once a week that `Get-ScheduledTaskInfo -TaskName Sync-Work-To-NAS` reports `LastTaskResult` 0.
+
 ### Monthly Updates (First Week)
+- Monthly backup of personal settings and data (`scripts\Backup-Monthly.ps1`): see [Monthly Backup](#-monthly-backup-of-personal-settings-and-data)
 - Dell firmware and drivers (SupportAssist)
 - Windows updates
 - Ninite utilities update
@@ -839,6 +843,85 @@ Get-InstalledModule | Sort-Object -Property Name
 
 ---
 
+## 💾 Monthly Backup of Personal Settings and Data
+
+**Frequency**: Monthly, right after the updates (or before, if an update is risky)  
+**Tool**: `scripts\Backup-Monthly.ps1`  
+**Duration**: 5-10 minutes (the WSL home archive is the slowest step)
+
+`C:\Work` is already copied to the NAS every week ([Workspace Structure, section 7](workspace-structure.md#7-weekly-nas-sync)). This script covers what lives **outside** `C:\Work` and would be lost with the laptop. Everything goes to one dated folder, `C:\Work\1729\backups\monthly\<yyyy-MM>`, so the next Sunday's NAS sync carries it to the NAS.
+
+| Item | What is backed up | Result in `<yyyy-MM>\` |
+|------|-------------------|------------------------|
+| **Bitwarden** | Encrypted export of the vault (`bw export`, `encrypted_json`) | `Bitwarden\bitwarden-export.json` |
+| **SSH and Git** | `~\.ssh` and every `~\.git*` file/folder, AES-256 zip | `SshGit\ssh-git.zip` |
+| **Edge favorites** | `Bookmarks` of every Edge profile | `Edge\<profile>\Bookmarks` |
+| **Remote Desktop Manager** | Data source (`Connections.db`) and settings from `%LOCALAPPDATA%\Devolutions\RemoteDesktopManager` | `RemoteDesktopManager\` |
+| **SSMS** | `%APPDATA%\Microsoft\SQL Server Management Studio` and, per version, `Settings`, `UnifiedSettings`, `settings.json` from `%LOCALAPPDATA%\Microsoft\SSMS` | `Ssms\Roaming`, `Ssms\Local\<version>` |
+| **Desktop** | The Desktop folder | `Desktop\` |
+| **WSL home** | The whole home folder of the Debian distribution, `.tar.gz` | `WslHome\wsl-home.tar.gz` |
+| **Windows Terminal** | `settings.json` (Store stable and Preview, unpackaged) | `WindowsTerminal\<package>\settings.json` |
+| **SQL Prompt** | `Snippets` and `Styles` from `%LOCALAPPDATA%\Red Gate\SQL Prompt <version>` | `SqlPrompt\<version>\` |
+| **hosts file** | `C:\Windows\System32\drivers\etc\hosts` | `Hosts\hosts` |
+
+### Prerequisites (once)
+
+```powershell
+winget install Bitwarden.CLI      # for the Bitwarden export (the step is skipped without it)
+# 7-Zip is already installed by Ninite (needed for the encrypted SSH/Git zip)
+```
+
+### Run
+
+```powershell
+cd C:\Work\1729\repos\work-laptop\scripts
+.\Backup-Monthly.ps1 -WhatIf      # dry run: lists what would be backed up, writes nothing
+.\Backup-Monthly.ps1              # full backup
+```
+
+The script asks for:
+
+1. a **backup password**, twice. It protects the Bitwarden export and the SSH/Git zip, because both end up on the NAS. **Store it in a place that is not the Bitwarden vault you are backing up** (for example on paper). It must not contain double quotes. With an empty password the two items are skipped, never written in clear text.
+2. your **Bitwarden master password** (and the e-mail and two-step code if the CLI is not logged in). If the script had to log in, it logs out again at the end.
+
+Those two items run first, so you can walk away afterwards. For an unattended run: `.\Backup-Monthly.ps1 -Skip Bitwarden,SshGit`.
+
+Useful switches: `-Only WslHome`, `-Skip Desktop`, `-WslExclude '.cache','node_modules'` (smaller WSL archive), `-WslDistro Ubuntu`, `-BackupRoot D:\Backups`.
+
+### Before you run it
+
+- **Close Remote Desktop Manager and SSMS** (the script warns if they are open). Their files are copied while open, but only a closed application guarantees a consistent copy. Edge can stay open.
+- Running it twice in the same month overwrites the same files. Files that no longer exist on the source stay in the backup folder; nothing is ever deleted.
+
+### Check the result
+
+The script ends with a table (OK / SKIPPED / FAILED) and exits with code 1 if an item failed. Logs: `%LOCALAPPDATA%\Backup-Monthly\logs`. The first time, verify that the Bitwarden export can be restored (Bitwarden web vault → Tools → Import data → *Bitwarden (json)*, with the backup password).
+
+### What is NOT covered
+
+- Bitwarden **attachments** and **organization** vaults (`bw export` exports the personal vault only).
+- Edge passwords, history and extensions (only the favorites). If Edge sync is on, favorites are also in your Microsoft account.
+- Docker volumes and SQL Server backups: see [Workspace Structure, section 6.3](workspace-structure.md#63-backing-up-what-lives-in-named-volumes).
+
+### Restore
+
+Close the application first, then copy the files back:
+
+| Item | Restore |
+|------|---------|
+| Bitwarden | Web vault → Tools → Import data → *Bitwarden (json)*, enter the backup password |
+| SSH and Git | `& "C:\Program Files\7-Zip\7z.exe" x ssh-git.zip -o"$HOME"` (asks for the password). In WSL run `chmod 600 ~/.ssh/id_*` for the private keys |
+| Edge | Copy `Bookmarks` over the file of the same profile in `%LOCALAPPDATA%\Microsoft\Edge\User Data\<profile>\` |
+| Remote Desktop Manager | Copy the folder back to `%LOCALAPPDATA%\Devolutions\RemoteDesktopManager`. Saved passwords are protected per Windows user: if they do not open on a new account, re-enter them |
+| SSMS | Copy `Ssms\Roaming` to `%APPDATA%\Microsoft\SQL Server Management Studio` and `Ssms\Local\<version>` to `%LOCALAPPDATA%\Microsoft\SSMS\<version>`. Saved connection passwords are tied to the Windows user |
+| Desktop | Copy back to the Desktop |
+| WSL home | In the new distribution: `wsl -d Debian --cd ~ -- tar xzf /mnt/c/Work/1729/backups/monthly/<yyyy-MM>/WslHome/wsl-home.tar.gz` |
+| Windows Terminal | Copy `settings.json` back to `%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\` |
+| SQL Prompt | Copy `Snippets` and `Styles` into `%LOCALAPPDATA%\Red Gate\SQL Prompt <version>\` (SSMS closed) |
+| hosts | Copy to `C:\Windows\System32\drivers\etc\hosts` from an elevated PowerShell |
+
+---
+
 ## ✅ Post-Update Verification
 
 After completing all updates:
@@ -900,6 +983,12 @@ After completing all updates:
 Copy this checklist for each monthly update session:
 
 **Update Date**: [____________________]
+
+### Monthly Backup (`scripts\Backup-Monthly.ps1`)
+- [ ] RDM and SSMS closed
+- [ ] `.\Backup-Monthly.ps1` run, summary shows no FAILED item
+- [ ] Bitwarden export, SSH/Git zip, Edge favorites, RDM, SSMS, Desktop, WSL home, Windows Terminal, SQL Prompt and hosts all OK (not SKIPPED)
+- [ ] Backup password stored outside the Bitwarden vault
 
 ### Dell & Windows
 - [ ] Dell SupportAssist - Check for updates

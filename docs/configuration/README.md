@@ -14,7 +14,8 @@ This folder contains guides for configuring Windows, system settings, and softwa
 - [Periodic Updates Guide](periodic-updates.md) ✅ Created
   - Comprehensive update procedures for all software
   - Dell firmware and BIOS updates via SupportAssist
-  - Monthly update checklist
+  - Monthly checklist
+  - Monthly backup of personal settings and data (Bitwarden, SSH/Git, Edge, RDM, SSMS, Desktop, WSL home, Windows Terminal, SQL Prompt, hosts) with `scripts\Backup-Monthly.ps1`
   - Troubleshooting update issues
 
 ### Network & Domain
@@ -26,6 +27,7 @@ This folder contains guides for configuring Windows, system settings, and softwa
 - [Workspace Structure](workspace-structure.md) ✅ Created
   - Directory layout for customers, repositories, Docker stacks, documents and backups
   - Git identity per customer, weekly NAS sync, invoices on Google Drive
+  - Weekly backup of `C:\Work` to the NAS with `scripts\Sync-Work.ps1` (section 7)
 
 ### Development Environment
 - Visual Studio settings and extensions
